@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "serv": "npx tsc && node dist\\app.js"
+    "start": "npm run build && npm run serv",
+    "build": "npx tsc",
+    "serv": "node dist\\app.js"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +16,7 @@
     "typescript": "^4.9.3"
   },
   "dependencies": {
+    "cookie-parser": "^1.4.6",
     "express": "^4.17.1"
   }
 }
