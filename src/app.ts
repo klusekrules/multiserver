@@ -6,87 +6,7 @@ import path from 'path';
 
 import { AceBase, DataReference, DataSnapshot } from 'acebase';
 
-const everyauth = require('everyauth');
-
-const usersById = {};
-let nextUserId = 0;
-
-function addUser (source) {
-  const id = ++nextUserId;
-  return usersById[nextUserId] = { ...source, id };
-}
-
-const usersByLogin = {
-  'brian@example.com': addUser({ login: 'brian@example.com', password: 'password'})
-};
-
-everyauth.everymodule
-  .findUserById( function (id, callback) {
-    callback(null, usersById[id]);
-  });
-
-everyauth
-  .password
-    .loginWith('email')
-    .getLoginPath('/login')
-    .postLoginPath('/login')
-    .loginView('login')
-//    .loginLocals({
-//      title: 'Login'
-//    })
-//    .loginLocals(function (req, res) {
-//      return {
-//        title: 'Login'
-//      }
-//    })
-    .loginLocals( function (req, res, done) {
-      setTimeout( function () {
-        done(null, {
-          title: 'Async login'
-        });
-      }, 200);
-    })
-    .authenticate( function (login, password) {
-      var errors = [];
-      if (!login) errors.push('Missing login');
-      if (!password) errors.push('Missing password');
-      if (errors.length) return errors;
-      var user = usersByLogin[login];
-      if (!user) return ['Login failed'];
-      if (user.password !== password) return ['Login failed'];
-      return user;
-    })
-
-    .getRegisterPath('/register')
-    .postRegisterPath('/register')
-    .registerView('register')
-//    .registerLocals({
-//      title: 'Register'
-//    })
-//    .registerLocals(function (req, res) {
-//      return {
-//        title: 'Sync Register'
-//      }
-//    })
-    .registerLocals( function (req, res, done) {
-      setTimeout( function () {
-        done(null, {
-          title: 'Async Register'
-        });
-      }, 200);
-    })
-    .validateRegistration( function (newUserAttrs, errors) {
-      var login = newUserAttrs.login;
-      if (usersByLogin[login]) errors.push('Login already taken');
-      return errors;
-    })
-    .registerUser( function (newUserAttrs) {
-      var login = newUserAttrs[this.loginKey()];
-      return usersByLogin[login] = addUser(newUserAttrs);
-    })
-
-    .loginSuccessRedirect('/')
-    .registerSuccessRedirect('/');
+const hash = require('pbkdf2-password')();
 
 const app = express()
 
@@ -98,16 +18,100 @@ app
     resave: false, // don't save session if unmodified
     saveUninitialized: false, // don't create session until something stored
     secret: 'shhhh, very secret'
-  }))
-  .use(everyauth.middleware(app));
-
-everyauth.helpExpress(app);
+  }));
 
 app.set('view engine', 'pug');
 app.set('views', path.join(__dirname, '..\\src\\views'));
 
-app.get('/', (req, res) => {
-  res.render('home');
+
+app.use((req, res, next) => {
+  const err = (req as any).session.error;
+  const msg = (req as any).session.success;
+  delete (req as any).session.error;
+  delete (req as any).session.success;
+  res.locals.message = '';
+  if (err) res.locals.message = '<p class="msg error">' + err + '</p>';
+  if (msg) res.locals.message = '<p class="msg success">' + msg + '</p>';
+  next();
+});
+
+
+let users = {
+  tj: { name: 'tj', salt: null, hash: null }
+};
+
+// when you create a user, generate a salt
+// and hash the password ('foobar' is the pass here)
+
+hash({ password: 'foobar' }, function (err, pass, salt, hash) {
+  if (err) throw err;
+  // store the salt & hash in the "db"
+  users.tj.salt = salt;
+  users.tj.hash = hash;
+});
+
+function authenticate(name, pass, fn) {
+  var user = users[name];
+  // query the db for the given username
+  if (!user) return fn(null, null)
+  // apply the same algorithm to the POSTed password, applying
+  // the hash against the pass / salt, if there is a match we
+  // found the user
+  hash({ password: pass, salt: user.salt }, function (err, pass, salt, hash) {
+    if (err) return fn(err);
+    if (hash === user.hash) return fn(null, user)
+    fn(null, null)
+  });
+}
+
+function restrict(req, res, next) {
+  if (req.session.user) {
+    next();
+  } else {
+    req.session.error = 'Access denied!';
+    res.redirect('/login');
+  }
+}
+
+app.get('/restricted', restrict, function(req, res){
+  res.send('Wahoo! restricted area, click to <a href="/logout">logout</a>');
+});
+
+app.get('/logout', function(req, res){
+  // destroy the user's session to log them out
+  // will be re-created next request
+  (req as any).session.destroy(function(){
+    res.redirect('/');
+  });
+});
+
+app.get('/login', function(req, res){
+  res.render('login');
+});
+
+app.post('/login', function (req, res, next) {
+  authenticate(req.body.username, req.body.password, function(err, user){
+    if (err) return next(err)
+    if (user) {
+      // Regenerate session when signing in
+      // to prevent fixation
+      (req as any).session.regenerate(function(){
+        // Store the user's primary key
+        // in the session store to be retrieved,
+        // or in this case the entire user object
+        (req as any).session.user = user;
+        (req as any).session.success = 'Authenticated as ' + user.name
+          + ' click to <a href="/logout">logout</a>. '
+          + ' You may now access <a href="/restricted">/restricted</a>.';
+        res.redirect('/restricted');
+      });
+    } else {
+      (req as any).session.error = 'Authentication failed, please check your '
+        + ' username and password.'
+        + ' (use "tj" and "foobar")';
+      res.redirect('/login');
+    }
+  });
 });
 
 const db = new AceBase('.');

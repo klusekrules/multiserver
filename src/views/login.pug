@@ -1,9 +1,9 @@
 form(action='/login', method='post')
   #login
-    label(for=everyauth.password.loginFormFieldName) Login
-    input(type='text', name=everyauth.password.loginFormFieldName, value=email)
+    label(for='username') Login
+    input(type='text', name='username', value=email)
   #password
-    label(for=everyauth.password.passwordFormFieldName) Password
-    input(type='password', name=everyauth.password.passwordFormFieldName)
+    label(for='password') Password
+    input(type='password', name='password')
   #submit
     button(type='submit') Login

@@ -19,9 +19,9 @@
     "acebase": "^1.26.2",
     "body-parser": "^1.20.1",
     "cookie-parser": "^1.4.6",
-    "everyauth": "^0.4.9",
     "express": "^4.17.1",
     "express-session": "^1.17.3",
+    "pbkdf2-password": "^1.2.1",
     "pug": "^3.0.2"
   }
 }
