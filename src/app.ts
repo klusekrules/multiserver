@@ -1,13 +1,117 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
+import bodyParser from 'body-parser';
+import session from 'express-session';
+import path from 'path';
+
 import { AceBase, DataReference, DataSnapshot } from 'acebase';
 
-const db = new AceBase('.');
-const cookieParser = require('cookie-parser');
-const app = express();
-const port = 3000;
+const everyauth = require('everyauth');
 
-app.use(cookieParser());
+const usersById = {};
+let nextUserId = 0;
+
+function addUser (source) {
+  const id = ++nextUserId;
+  return usersById[nextUserId] = { ...source, id };
+}
+
+const usersByLogin = {
+  'brian@example.com': addUser({ login: 'brian@example.com', password: 'password'})
+};
+
+everyauth.everymodule
+  .findUserById( function (id, callback) {
+    callback(null, usersById[id]);
+  });
+
+everyauth
+  .password
+    .loginWith('email')
+    .getLoginPath('/login')
+    .postLoginPath('/login')
+    .loginView('login')
+//    .loginLocals({
+//      title: 'Login'
+//    })
+//    .loginLocals(function (req, res) {
+//      return {
+//        title: 'Login'
+//      }
+//    })
+    .loginLocals( function (req, res, done) {
+      setTimeout( function () {
+        done(null, {
+          title: 'Async login'
+        });
+      }, 200);
+    })
+    .authenticate( function (login, password) {
+      var errors = [];
+      if (!login) errors.push('Missing login');
+      if (!password) errors.push('Missing password');
+      if (errors.length) return errors;
+      var user = usersByLogin[login];
+      if (!user) return ['Login failed'];
+      if (user.password !== password) return ['Login failed'];
+      return user;
+    })
+
+    .getRegisterPath('/register')
+    .postRegisterPath('/register')
+    .registerView('register')
+//    .registerLocals({
+//      title: 'Register'
+//    })
+//    .registerLocals(function (req, res) {
+//      return {
+//        title: 'Sync Register'
+//      }
+//    })
+    .registerLocals( function (req, res, done) {
+      setTimeout( function () {
+        done(null, {
+          title: 'Async Register'
+        });
+      }, 200);
+    })
+    .validateRegistration( function (newUserAttrs, errors) {
+      var login = newUserAttrs.login;
+      if (usersByLogin[login]) errors.push('Login already taken');
+      return errors;
+    })
+    .registerUser( function (newUserAttrs) {
+      var login = newUserAttrs[this.loginKey()];
+      return usersByLogin[login] = addUser(newUserAttrs);
+    })
+
+    .loginSuccessRedirect('/')
+    .registerSuccessRedirect('/');
+
+const app = express()
+
+app
+  .use(bodyParser.json())
+  .use(cookieParser())
+  .use(express.urlencoded({ extended: false }))
+  .use(session({
+    resave: false, // don't save session if unmodified
+    saveUninitialized: false, // don't create session until something stored
+    secret: 'shhhh, very secret'
+  }))
+  .use(everyauth.middleware(app));
+
+everyauth.helpExpress(app);
+
+app.set('view engine', 'pug');
+app.set('views', path.join(__dirname, '..\\src\\views'));
+
+app.get('/', (req, res) => {
+  res.render('home');
+});
+
+const db = new AceBase('.');
+const port = 3000;
 
 app.get('/p', (req, res) => {
   const cookie = req.cookies + req.cookies.name ? req.cookies.name : null;
