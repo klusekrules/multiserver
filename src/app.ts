@@ -29,6 +29,25 @@ app.get('/p', (req, res) => {
     });
 });
 
+app.get('/repositories/:name/list', async (req, res) => {
+  console.log(`GET /repositories/${req.params.name}/list`);
+  const count = await db.ref(`repositories/${req.params.name}`).count();
+  if (count) {
+    const snap = await db.ref(`repositories/${req.params.name}`).get();
+    const values = snap.val();
+    res.send('value: ' + JSON.stringify(values));
+  } else {
+    res.send('none');
+  }
+});
+
+app.get('/repositories/:name/add', async (req, res) => {
+  console.log(`GET /repositories/${req.params.name}/add`);
+  const ref = await db.ref(`repositories/${req.params.name}/${req.query.id}`).set({name: req.query.name});
+  const snap = await ref.get();
+  res.send('value: ' + JSON.stringify(snap.val()));
+});
+
 db.ready(() => {
   app.listen(port, () => {
     return console.log(`Express is listening at http://localhost:${port}`);
