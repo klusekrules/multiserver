@@ -4,11 +4,14 @@ import bodyParser from 'body-parser';
 import session from 'express-session';
 import path from 'path';
 
-import { AceBase, DataReference, DataSnapshot } from 'acebase';
+import { AceBase, DataReference, DataSnapshot, DataSnapshotsArray } from 'acebase';
 
 const hash = require('pbkdf2-password')();
 
-const app = express()
+const app = express();
+
+const db = new AceBase('.');
+const port = 3000;
 
 app
   .use(bodyParser.json())
@@ -35,33 +38,46 @@ app.use((req, res, next) => {
   next();
 });
 
+async function createUser(login, password, fn) {
+  await db.query('users')
+    .filter('login', '==', login)
+    .get(snapshots => {
+      if (snapshots.length) {
+        fn({ success: false });
+      } else {
+        hash({ password }, (err, pass, salt, hash) => {
+          if (err)
+            fn({ success: false, error: err });
+          db.ref('users').push({ login, salt, hash }).then(userRef => {
+            userRef.get((snapshot: DataSnapshot) => {
+              fn({ success: true, user: snapshot.val() });
+            });
+          });
+        });
+      }
+    }); 
+}
 
-let users = {
-  tj: { name: 'tj', salt: null, hash: null }
-};
-
-// when you create a user, generate a salt
-// and hash the password ('foobar' is the pass here)
-
-hash({ password: 'foobar' }, function (err, pass, salt, hash) {
-  if (err) throw err;
-  // store the salt & hash in the "db"
-  users.tj.salt = salt;
-  users.tj.hash = hash;
-});
-
-function authenticate(name, pass, fn) {
-  var user = users[name];
-  // query the db for the given username
-  if (!user) return fn(null, null)
-  // apply the same algorithm to the POSTed password, applying
-  // the hash against the pass / salt, if there is a match we
-  // found the user
-  hash({ password: pass, salt: user.salt }, function (err, pass, salt, hash) {
-    if (err) return fn(err);
-    if (hash === user.hash) return fn(null, user)
-    fn(null, null)
-  });
+async function authenticate(login, password, fn) {
+  await db.query('users')
+    .filter('login', '==', login)
+    .get((snapshots: DataSnapshotsArray) => {
+      if (!snapshots.length) {
+        return fn({ success: false });
+      } else {
+        const user = snapshots[0].val();
+        hash({ password, salt: user.salt }, (err, pass, salt, hash) => {
+          if (err)
+            return fn({ success: false, error: err });
+          if (hash === user.hash) 
+            return fn({ success: true, user: {
+              login: user.login,
+              key: snapshots[0].key,
+            } });
+          return fn({ success: false });
+        });
+      }
+    });
 }
 
 function restrict(req, res, next) {
@@ -78,44 +94,46 @@ app.get('/restricted', restrict, function(req, res){
 });
 
 app.get('/logout', function(req, res){
-  // destroy the user's session to log them out
-  // will be re-created next request
   (req as any).session.destroy(function(){
-    res.redirect('/');
+    res.redirect('/login');
   });
 });
 
-app.get('/login', function(req, res){
-  res.render('login');
+app.get('/home', (req, res) => {
+  res.render('home', { session: (req as any).session });
 });
 
-app.post('/login', function (req, res, next) {
-  authenticate(req.body.username, req.body.password, function(err, user){
-    if (err) return next(err)
+app.get('/login', (req, res) => {
+  res.render('login', { session: (req as any).session });
+});
+
+app.get('/register', (req, res) => {
+  res.render('register', { session: (req as any).session });
+});
+
+app.post('/login', (req, res, next) => {
+  authenticate(req.body.login, req.body.password, ({success, error, user}) => {
+    if (!success) return next(error);
     if (user) {
-      // Regenerate session when signing in
-      // to prevent fixation
-      (req as any).session.regenerate(function(){
-        // Store the user's primary key
-        // in the session store to be retrieved,
-        // or in this case the entire user object
+      (req as any).session.regenerate(() => {
         (req as any).session.user = user;
-        (req as any).session.success = 'Authenticated as ' + user.name
-          + ' click to <a href="/logout">logout</a>. '
-          + ' You may now access <a href="/restricted">/restricted</a>.';
         res.redirect('/restricted');
       });
     } else {
       (req as any).session.error = 'Authentication failed, please check your '
-        + ' username and password.'
+        + ' login and password.'
         + ' (use "tj" and "foobar")';
       res.redirect('/login');
     }
   });
 });
 
-const db = new AceBase('.');
-const port = 3000;
+app.post('/register', (req, res, next) => {
+  createUser(req.body.login, req.body.password, ({success, error, user}) => {
+    if (!success) return next(error);
+    res.redirect('/login');
+  });
+});
 
 app.get('/p', (req, res) => {
   const cookie = req.cookies + req.cookies.name ? req.cookies.name : null;
