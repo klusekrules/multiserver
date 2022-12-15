@@ -1,4 +1,4 @@
-- if (!everyauth.loggedIn)
+- if (session.error)
   h2 Not Authenticated
   #register
     a(href='/register') Register
@@ -6,7 +6,9 @@
     a(href='/login', style='border: 0px') Login with Password
   h3
     a(href='/logout') Logout
+  pre=JSON.stringify(session, null, 2)
 - else
   h2 Authenticated
   h3
     a(href='/logout') Logout
+  pre=JSON.stringify(session, null, 2)
