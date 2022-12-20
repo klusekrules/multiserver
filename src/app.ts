@@ -5,19 +5,24 @@ import session from 'express-session';
 import path from 'path';
 import fs from 'fs';
 import https from 'https';
+import cors from 'cors';
 
 import { AceBase, DataReference, DataSnapshot, DataSnapshotsArray } from 'acebase';
-
+const corsOptions = {
+  origin: '*',
+  optionsSuccessStatus: 200
+}
 const hash = require('pbkdf2-password')();
 
 const app = express();
-const privateKey  = fs.readFileSync('/home/ubuntu/selfsigned.key', 'utf8');
-const certificate = fs.readFileSync('/home/ubuntu/selfsigned.crt', 'utf8');
+const privateKey  = fs.readFileSync('/home/ubuntu/vps-7357abad.vps.ovh.net.key', 'utf8');
+const certificate = fs.readFileSync('/home/ubuntu/vps-7357abad.vps.ovh.net.crt', 'utf8');
 const credentials = { key: privateKey, cert: certificate };
 
 const db = new AceBase('.');
 
 app
+  .use(cors(corsOptions ))
   .use(bodyParser.json())
   .use(cookieParser())
   .use(express.urlencoded({ extended: false }))
@@ -120,13 +125,13 @@ app.post('/login', (req, res, next) => {
     if (user) {
       (req as any).session.regenerate(() => {
         (req as any).session.user = user;
-        res.redirect('/restricted');
+        res.json({msg: 'Loggin success'});
       });
     } else {
       (req as any).session.error = 'Authentication failed, please check your '
         + ' login and password.'
         + ' (use "tj" and "foobar")';
-      res.redirect('/login');
+      res.json({msg: 'Authentication failed'});
     }
   });
 });
