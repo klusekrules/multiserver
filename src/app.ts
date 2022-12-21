@@ -1,3 +1,4 @@
+import { AceBase, DataSnapshot, DataSnapshotsArray } from 'acebase';
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import bodyParser from 'body-parser';
@@ -5,37 +6,33 @@ import session from 'express-session';
 import path from 'path';
 import fs from 'fs';
 import https from 'https';
+import http from 'http';
 import cors from 'cors';
+import defaultConfig from './config';
 
-import { AceBase, DataReference, DataSnapshot, DataSnapshotsArray } from 'acebase';
-const corsOptions = {
-  origin: '*',
-  optionsSuccessStatus: 200
+let config: any = defaultConfig;
+
+try {
+  config = JSON.parse(fs.readFileSync(process.env.SERVER_CONFIGJS, 'utf8'));
+} catch (e) {
+  console.error(e);
 }
+
 const hash = require('pbkdf2-password')();
-
 const app = express();
-const privateKey  = fs.readFileSync('/home/ubuntu/vps-7357abad.vps.ovh.net.key', 'utf8');
-const certificate = fs.readFileSync('/home/ubuntu/vps-7357abad.vps.ovh.net.crt', 'utf8');
-const credentials = { key: privateKey, cert: certificate };
-
-const db = new AceBase('.');
+const db = new AceBase(config.aceBase.name);
 
 app
-  .use(cors(corsOptions ))
+  .use(express.static('ui'))
+  .use(cors(config.cors))
   .use(bodyParser.json())
   .use(cookieParser())
   .use(express.urlencoded({ extended: false }))
-  .use(session({
-    resave: false, // don't save session if unmodified
-    saveUninitialized: false, // don't create session until something stored
-    secret: 'shhhh, very secret'
-  }));
+  .use(session(config.session))
+  .set('view engine', 'pug')
+  .set('views', path.join(__dirname, '..//src//views'));
 
-app.set('view engine', 'pug');
-app.set('views', path.join(__dirname, '..//src//views'));
-
-app.use((req, res, next) => {
+/*app.use((req, res, next) => {
   const err = (req as any).session.error;
   const msg = (req as any).session.success;
   delete (req as any).session.error;
@@ -44,7 +41,7 @@ app.use((req, res, next) => {
   if (err) res.locals.message = '<p class="msg error">' + err + '</p>';
   if (msg) res.locals.message = '<p class="msg success">' + msg + '</p>';
   next();
-});
+});*/
 
 async function createUser(login, password, fn) {
   await db.query('users')
@@ -92,21 +89,22 @@ function restrict(req, res, next) {
   if (req.session.user) {
     next();
   } else {
-    req.session.error = 'Access denied!';
-    res.redirect('/login');
+    (req as any).session.destroy(function(){
+      res.redirect('/login');
+    });
   }
 }
-
+/*
 app.get('/restricted', restrict, function(req, res){
   res.send('Wahoo! restricted area, click to <a href="/logout">logout</a>');
 });
-
+*/
 app.get('/logout', function(req, res){
   (req as any).session.destroy(function(){
     res.redirect('/login');
   });
 });
-
+/*
 app.get('/home', (req, res) => {
   res.render('home', { session: (req as any).session });
 });
@@ -118,7 +116,7 @@ app.get('/login', (req, res) => {
 app.get('/register', (req, res) => {
   res.render('register', { session: (req as any).session });
 });
-
+*/
 app.post('/login', (req, res, next) => {
   authenticate(req.body.login, req.body.password, ({success, error, user}) => {
     if (!success) return next(error);
@@ -142,7 +140,7 @@ app.post('/register', (req, res, next) => {
     res.redirect('/login');
   });
 });
-
+/*
 app.get('/p', (req, res) => {
   const cookie = req.cookies + req.cookies.name ? req.cookies.name : null;
   console.log(req.query);
@@ -162,36 +160,47 @@ app.get('/p', (req, res) => {
       });
     });
 });
-
-app.get('/repositories/:name/list', async (req, res) => {
+*/
+app.get('/repositories/:name/list', restrict, async (req, res) => {
   console.log(`GET /repositories/${req.params.name}/list`);
   const count = await db.ref(`repositories/${req.params.name}`).count();
   if (count) {
     const snap = await db.ref(`repositories/${req.params.name}`).get();
     const values = snap.val();
-    res.send('value: ' + JSON.stringify(values));
+    res.json(values);
   } else {
-    res.send('none');
+    res.json({});
   }
 });
 
-app.get('/repositories/:name/add', async (req, res) => {
+app.post('/repositories/:name/add', restrict, async (req, res) => {
   console.log(`GET /repositories/${req.params.name}/add`);
   const ref = await db.ref(`repositories/${req.params.name}/${req.query.id}`).set({name: req.query.name});
   const snap = await ref.get();
-  res.send('value: ' + JSON.stringify(snap.val()));
+  res.json(snap.val());
 });
 
+function createServer(app) {
+  const privateKey  = fs.readFileSync(config.ssl.privateKey, 'utf8');
+  const certificate = fs.readFileSync(config.ssl.certificate, 'utf8');
+  const credentials = { key: privateKey, cert: certificate };
+  return https.createServer(credentials, app);
+}
+
 db.ready(() => {
-  const httpsServer = https.createServer(credentials, app);
-  httpsServer.listen(8443);
+  const server = config.general.useHttps
+    ? createServer(app)
+    : http.createServer(app);
+  server.listen(8443);
 
   const gracefulShutdown = (signal) => {
-    if (signal)
+    if (signal) {
       console.log(`\nReceived signal ${signal}`);
+    }
+
     console.log('Gracefully closing http server');
 
-    httpsServer.closeAllConnections();
+    server.closeAllConnections();
 
     db.close()
       .then(() => {
@@ -202,7 +211,7 @@ db.ready(() => {
       })
       .finally(() => {
         try {
-          httpsServer.close((err) => {
+          server.close((err) => {
             if (err) {
               console.error('While closng server there was an error', err);
               process.exit(1);

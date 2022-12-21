@@ -19,6 +19,7 @@
     "acebase": "^1.26.2",
     "body-parser": "^1.20.1",
     "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
     "express": "^4.17.1",
     "express-session": "^1.17.3",
     "pbkdf2-password": "^1.2.1",
