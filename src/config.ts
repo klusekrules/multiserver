@@ -8,6 +8,7 @@ export default {
   },
   general: {
     useHttps: false,
+    port: 8443,
   },
   session: {
     resave: false, // don't save session if unmodified

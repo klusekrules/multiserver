@@ -43,43 +43,51 @@ app
   next();
 });*/
 
-async function createUser(login, password, fn) {
+async function createUser(payload, fn) {
   await db.query('users')
-    .filter('login', '==', login)
+    .filter('login', '==', payload.login)
     .get(snapshots => {
       if (snapshots.length) {
         fn({ success: false });
       } else {
-        hash({ password }, (err, pass, salt, hash) => {
-          if (err)
+        hash({ password: payload.password }, (err, pass, salt, hash) => {
+          if (err) {
             fn({ success: false, error: err });
-          db.ref('users').push({ login, salt, hash }).then(userRef => {
-            userRef.get((snapshot: DataSnapshot) => {
-              fn({ success: true, user: snapshot.val() });
+          }
+
+          db.ref('users')
+            .push({ login: payload.login, salt, hash })
+            .then(userRef => {
+              userRef.get((snapshot: DataSnapshot) => {
+                fn({ success: true, user: snapshot.val() });
+              });
             });
-          });
         });
       }
     }); 
 }
 
-async function authenticate(login, password, fn) {
+async function authenticate(payload, fn) {
   await db.query('users')
-    .filter('login', '==', login)
+    .filter('login', '==', payload.login)
     .get((snapshots: DataSnapshotsArray) => {
       if (!snapshots.length) {
-        return fn({ success: false });
+        return fn({ success: false, error: 'User doesn\'t found' });
       } else {
         const user = snapshots[0].val();
-        hash({ password, salt: user.salt }, (err, pass, salt, hash) => {
-          if (err)
+        hash({ password: payload.password, salt: user.salt }, (err, pass, salt, hash) => {
+          if (err) {
             return fn({ success: false, error: err });
-          if (hash === user.hash) 
+          }
+
+          if (hash === user.hash) {
             return fn({ success: true, user: {
               login: user.login,
               key: snapshots[0].key,
             } });
-          return fn({ success: false });
+          }
+
+          return fn({ success: false, error: 'Password doesn\'t match' });
         });
       }
     });
@@ -99,9 +107,9 @@ app.get('/restricted', restrict, function(req, res){
   res.send('Wahoo! restricted area, click to <a href="/logout">logout</a>');
 });
 */
-app.get('/logout', function(req, res){
-  (req as any).session.destroy(function(){
-    res.redirect('/login');
+app.get('/logout',(req, res) => {
+  (req as any).session.destroy(() => {
+    res.status(200);
   });
 });
 /*
@@ -118,26 +126,29 @@ app.get('/register', (req, res) => {
 });
 */
 app.post('/login', (req, res, next) => {
-  authenticate(req.body.login, req.body.password, ({success, error, user}) => {
-    if (!success) return next(error);
-    if (user) {
+  authenticate(req.body, ({success, error, user}) => {
+    if (success) {
       (req as any).session.regenerate(() => {
         (req as any).session.user = user;
-        res.json({msg: 'Loggin success'});
+        console.info('User login', user);
+        res.status(200).json({});
       });
     } else {
-      (req as any).session.error = 'Authentication failed, please check your '
-        + ' login and password.'
-        + ' (use "tj" and "foobar")';
-      res.json({msg: 'Authentication failed'});
+      console.error('Error while user login', error);
+      res.status(400).json({ msg: error });
     }
   });
 });
 
 app.post('/register', (req, res, next) => {
-  createUser(req.body.login, req.body.password, ({success, error, user}) => {
-    if (!success) return next(error);
-    res.redirect('/login');
+  createUser(req.body, ({success, error, user}) => {
+    if (success) {
+      console.info('User created', user);
+      res.status(201).json({});
+    } else {
+      console.error('Error while user creation', error);
+      res.status(400).json({ msg: error });
+    }
   });
 });
 /*
@@ -191,7 +202,10 @@ db.ready(() => {
   const server = config.general.useHttps
     ? createServer(app)
     : http.createServer(app);
-  server.listen(8443);
+  server.listen(config.general.port, () => {
+    console.log('Serwer listen on port: ', config.general.port);
+    console.log('Is https used: ', config.general.useHttps);
+  });
 
   const gracefulShutdown = (signal) => {
     if (signal) {
