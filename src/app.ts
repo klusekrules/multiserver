@@ -93,23 +93,21 @@ async function authenticate(payload, fn) {
     });
 }
 
-function restrict(req, res, next) {
-  if (req.session.user) {
+app.all('/api/*', (req, res, next) => {
+  if ((req as any).session.user) {
+    console.log('Access granted');
     next();
   } else {
-    (req as any).session.destroy(function(){
-      res.redirect('/login');
+    (req as any).session.destroy(() => {
+      console.log('Access denied');
+      res.status(401).end();
     });
   }
-}
-/*
-app.get('/restricted', restrict, function(req, res){
-  res.send('Wahoo! restricted area, click to <a href="/logout">logout</a>');
 });
-*/
-app.get('/logout',(req, res) => {
+
+app.get('/logout', (req, res) => {
   (req as any).session.destroy(() => {
-    res.status(200);
+    res.status(200).end();
   });
 });
 /*
@@ -125,7 +123,7 @@ app.get('/register', (req, res) => {
   res.render('register', { session: (req as any).session });
 });
 */
-app.post('/login', (req, res, next) => {
+app.post('/login', (req, res) => {
   authenticate(req.body, ({success, error, user}) => {
     if (success) {
       (req as any).session.regenerate(() => {
@@ -151,32 +149,12 @@ app.post('/register', (req, res, next) => {
     }
   });
 });
-/*
-app.get('/p', (req, res) => {
-  const cookie = req.cookies + req.cookies.name ? req.cookies.name : null;
-  console.log(req.query);
-  db.ref('users')
-    .push({
-        name: 'Ewout',
-        country: 'The Netherlands'
-    })
-    .then((userRef: DataReference) => {
-      console.log('key:', userRef.key);
-      userRef.get((snapshot: DataSnapshot) => {
-        if (snapshot.exists()) {
-          console.log('value:', snapshot.val());
-          res.cookie('name', req.query && req.query.name ? req.query.name : 'Test' );
-          res.send(`Hello World!${cookie ? ' + ' + cookie : ''}`);
-        }
-      });
-    });
-});
-*/
-app.get('/repositories/:name/list', restrict, async (req, res) => {
-  console.log(`GET /repositories/${req.params.name}/list`);
-  const count = await db.ref(`repositories/${req.params.name}`).count();
+
+app.get('/api/repo/list', async (req, res) => {
+  console.log(`GET /repo/list`);
+  const count = await db.ref(`repo`).count();
   if (count) {
-    const snap = await db.ref(`repositories/${req.params.name}`).get();
+    const snap = await db.ref(`repo`).get();
     const values = snap.val();
     res.json(values);
   } else {
@@ -184,9 +162,31 @@ app.get('/repositories/:name/list', restrict, async (req, res) => {
   }
 });
 
-app.post('/repositories/:name/add', restrict, async (req, res) => {
-  console.log(`GET /repositories/${req.params.name}/add`);
-  const ref = await db.ref(`repositories/${req.params.name}/${req.query.id}`).set({name: req.query.name});
+app.post('/api/repo/add', async (req, res) => {
+  console.log(`GET /repo/add`);
+  const ref = await db.ref(`repo`).push(req.body);
+  const snap = await ref.get();
+  res.json({
+    id: snap.key,
+    payload: snap.val(),
+  });
+});
+
+app.get('/api/repo/:name/list', async (req, res) => {
+  console.log(`GET /repo/${req.params.name}/list`);
+  const count = await db.ref(`repo/${req.params.name}`).count();
+  if (count) {
+    const snap = await db.ref(`repo/${req.params.name}`).get();
+    const values = snap.val();
+    res.json(values);
+  } else {
+    res.json({});
+  }
+});
+
+app.post('/api/repo/:name/add', async (req, res) => {
+  console.log(`GET /repo/${req.params.name}/add`);
+  const ref = await db.ref(`repo/${req.params.name}/${req.query.id}`).set({name: req.query.name});
   const snap = await ref.get();
   res.json(snap.val());
 });
