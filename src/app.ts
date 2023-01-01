@@ -32,17 +32,6 @@ app
   .set('view engine', 'pug')
   .set('views', path.join(__dirname, '..//src//views'));
 
-/*app.use((req, res, next) => {
-  const err = (req as any).session.error;
-  const msg = (req as any).session.success;
-  delete (req as any).session.error;
-  delete (req as any).session.success;
-  res.locals.message = '';
-  if (err) res.locals.message = '<p class="msg error">' + err + '</p>';
-  if (msg) res.locals.message = '<p class="msg success">' + msg + '</p>';
-  next();
-});*/
-
 async function createUser(payload, fn) {
   await db.query('users')
     .filter('login', '==', payload.login)
@@ -110,19 +99,7 @@ app.get('/logout', (req, res) => {
     res.status(200).end();
   });
 });
-/*
-app.get('/home', (req, res) => {
-  res.render('home', { session: (req as any).session });
-});
 
-app.get('/login', (req, res) => {
-  res.render('login', { session: (req as any).session });
-});
-
-app.get('/register', (req, res) => {
-  res.render('register', { session: (req as any).session });
-});
-*/
 app.post('/login', (req, res) => {
   authenticate(req.body, ({success, error, user}) => {
     if (success) {
