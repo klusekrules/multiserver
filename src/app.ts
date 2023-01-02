@@ -1,5 +1,4 @@
 import { AceBase, DataSnapshot, DataSnapshotsArray } from 'acebase';
-import express from 'express';
 import cookieParser from 'cookie-parser';
 import bodyParser from 'body-parser';
 import session from 'express-session';
@@ -9,6 +8,8 @@ import https from 'https';
 import http from 'http';
 import cors from 'cors';
 import defaultConfig from './config';
+import { All, Get, Post, Server, Set, Use } from './decorators/index';
+import express from 'express';
 
 let config: any = defaultConfig;
 
@@ -19,18 +20,70 @@ try {
 }
 
 const hash = require('pbkdf2-password')();
-const app = express();
 const db = new AceBase(config.aceBase.name);
 
-app
-  .use(express.static('ui'))
-  .use(cors(config.cors))
-  .use(bodyParser.json())
-  .use(cookieParser())
-  .use(express.urlencoded({ extended: false }))
-  .use(session(config.session))
-  .set('view engine', 'pug')
-  .set('views', path.join(__dirname, '..//src//views'));
+@Server({ port: 8443 })
+@Use(express.static('ui'))
+@Use(express.urlencoded({ extended: false }))
+@Use(cors(config.cors))
+@Use(session(config.session))
+@Use(cookieParser())
+@Use(bodyParser.json())
+@Set('view engine', 'pug')
+@Set('views', path.join(__dirname, '..//src//views'))
+class WebSerwer {
+  @All('/api/*')
+  checkSession(req, res, next) {
+    if ((req as any).session.user) {
+      console.log('Access granted');
+      next();
+    } else {
+      (req as any).session.destroy(() => {
+        console.log('Access denied');
+        res.status(401).end();
+      });
+    }
+  };
+
+  @Get('/logout')
+  logout(req, res) {
+    (req as any).session.destroy(() => {
+      res.status(200).end();
+    });
+  }
+
+  @Post('/login')
+  login(req, res) {
+    authenticate(req.body, ({success, error, user}) => {
+      if (success) {
+        (req as any).session.regenerate(() => {
+          (req as any).session.user = user;
+          console.info('User login', user);
+          res.status(200).json({});
+        });
+      } else {
+        console.error('Error while user login', error);
+        res.status(400).json({ msg: error });
+      }
+    });
+  }
+
+  @Post('/register')
+  register(req, res) {
+    createUser(req.body, ({success, error, user}) => {
+      if (success) {
+        console.info('User created', user);
+        res.status(201).json({});
+      } else {
+        console.error('Error while user creation', error);
+        res.status(400).json({ msg: error });
+      }
+    });
+  }
+}
+
+const temp = new WebSerwer;
+console.log('temp nowy', temp);
 
 async function createUser(payload, fn) {
   await db.query('users')
@@ -81,7 +134,7 @@ async function authenticate(payload, fn) {
       }
     });
 }
-
+/*
 app.all('/api/*', (req, res, next) => {
   if ((req as any).session.user) {
     console.log('Access granted');
@@ -221,3 +274,4 @@ db.ready(() => {
   process.on('SIGINT', gracefulShutdown);
   process.on('SIGTERM', gracefulShutdown);
 });
+*/
