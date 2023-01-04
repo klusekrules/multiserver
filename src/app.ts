@@ -8,19 +8,49 @@ import https from 'https';
 import http from 'http';
 import cors from 'cors';
 import defaultConfig from './config';
-import { All, Get, Post, Server, Set, Use } from './decorators/index';
+import { AddService, All, boot, Boot, Get, Init, Post, Server, Service, Set, SigInt, SigTerm, Use, UseServer } from './decorators/index';
 import express from 'express';
 
 let config: any = defaultConfig;
-
+/*
 try {
   config = JSON.parse(fs.readFileSync(process.env.SERVER_CONFIGJS, 'utf8'));
 } catch (e) {
   console.error(e);
 }
-
+*/
 const hash = require('pbkdf2-password')();
-const db = new AceBase(config.aceBase.name);
+
+@Service({ name: 'configService' })
+class ConfigService {
+  public data = defaultConfig;
+}
+
+@Service({ name: 'databaseService' })
+class DatabaseService {
+  static readonly _inject: string[] = ['configService'];
+  private db: AceBase;
+
+  constructor(config: ConfigService) {
+    this.db = new AceBase(config.data.aceBase.name);
+  }
+
+  ref(path) {
+    return this.db.ref(path);
+  }
+
+  query(path) {
+    return this.db.query(path);
+  }
+
+  close() {
+    return this.db.close();
+  }
+
+  ready() {
+    return this.db.ready();
+  }
+}
 
 @Server({ port: 8443 })
 @Use(express.static('ui'))
@@ -31,7 +61,57 @@ const db = new AceBase(config.aceBase.name);
 @Use(bodyParser.json())
 @Set('view engine', 'pug')
 @Set('views', path.join(__dirname, '..//src//views'))
+//@AddListener()
 class WebSerwer {
+  static readonly _inject: string[] = ['databaseService', 'configService'];
+  private test = 'dziala this';
+
+  constructor(private db: DatabaseService, public config: ConfigService) {
+    console.log('WebSerwer ctor', !!db, !!config);
+  }
+
+  @Init()
+  init() {
+    console.log('WebSerwer init function', this.test);
+    return this.db.ready();
+  }
+
+  @SigInt()
+  @SigTerm()
+  gracefulShutdown(server, signal) {
+    if (signal) {
+      console.log(`\nReceived signal ${signal}`);
+    }
+
+    console.log('Gracefully closing http server');
+
+    server.closeAllConnections();
+
+    this.db.close()
+      .then(() => {
+        console.log('db closed successfully. Exiting!');
+      })
+      .catch((err) => {
+        console.error('While closng db there was an error', err);
+      })
+      .finally(() => {
+        try {
+          server.close((err) => {
+            if (err) {
+              console.error('While closng server there was an error', err);
+              process.exit(1);
+            } else {
+              console.log('http server closed successfully. Exiting!');
+              process.exit(0);
+            }
+          })
+        } catch (err) {
+          console.error('There was an error', err);
+          setTimeout(() => process.exit(1), 500);
+        }
+      });
+  }
+
   @All('/api/*')
   checkSession(req, res, next) {
     if ((req as any).session.user) {
@@ -80,13 +160,63 @@ class WebSerwer {
       }
     });
   }
+
+  @Get('/api/repo/list')
+  async repoList(req, res) {
+    const count = await this.db.ref(`repo`).count();
+    if (count) {
+      const snap = await this.db.ref(`repo`).get();
+      const values = snap.val();
+      res.json(this.convertListToArray(values, 'id'));
+    } else {
+      res.json({});
+    }
+  }
+
+  @Post('/api/repo/add')
+  async repoAdd(req, res) {
+    const ref = await this.db.ref(`repo`).push(req.body);
+    const snap = await ref.get();
+    res.json({
+      id: snap.key,
+      payload: snap.val(),
+    });
+  }
+
+  @Get('/api/repo/:name/list')
+  async repoListValue(req, res) {
+    const count = await this.db.ref(`repo/${req.params.name}`).count();
+    if (count) {
+      const snap = await this.db.ref(`repo/${req.params.name}`).get();
+      const values = snap.val();
+      res.json(this.convertListToArray(values, 'id'));
+    } else {
+      res.json({});
+    }
+  };
+
+  @Post('/api/repo/:name/add')
+  async repoListValueAdd(req, res) {
+    const ref = await this.db.ref(`repo/${req.params.name}/${req.query.id}`).set({name: req.query.name});
+    const snap = await ref.get();
+    res.json(snap.val());
+  };
+
+  convertListToArray(object, idAttr) {
+    return Object.keys(object).map(val => ({ ...object[val], [idAttr]: val }));
+  }
 }
 
-const temp = new WebSerwer;
-console.log('temp nowy', temp);
+@Boot()
+@AddService(ConfigService)
+@AddService(DatabaseService)
+@UseServer(WebSerwer)
+class Bootstrap {}
+
+boot(Bootstrap);
 
 async function createUser(payload, fn) {
-  await db.query('users')
+  await this.db.query('users')
     .filter('login', '==', payload.login)
     .get(snapshots => {
       if (snapshots.length) {
@@ -97,7 +227,7 @@ async function createUser(payload, fn) {
             fn({ success: false, error: err });
           }
 
-          db.ref('users')
+          this.db.ref('users')
             .push({ login: payload.login, salt, hash })
             .then(userRef => {
               userRef.get((snapshot: DataSnapshot) => {
@@ -110,7 +240,7 @@ async function createUser(payload, fn) {
 }
 
 async function authenticate(payload, fn) {
-  await db.query('users')
+  await this.db.query('users')
     .filter('login', '==', payload.login)
     .get((snapshots: DataSnapshotsArray) => {
       if (!snapshots.length) {
@@ -134,144 +264,3 @@ async function authenticate(payload, fn) {
       }
     });
 }
-/*
-app.all('/api/*', (req, res, next) => {
-  if ((req as any).session.user) {
-    console.log('Access granted');
-    next();
-  } else {
-    (req as any).session.destroy(() => {
-      console.log('Access denied');
-      res.status(401).end();
-    });
-  }
-});
-
-app.get('/logout', (req, res) => {
-  (req as any).session.destroy(() => {
-    res.status(200).end();
-  });
-});
-
-app.post('/login', (req, res) => {
-  authenticate(req.body, ({success, error, user}) => {
-    if (success) {
-      (req as any).session.regenerate(() => {
-        (req as any).session.user = user;
-        console.info('User login', user);
-        res.status(200).json({});
-      });
-    } else {
-      console.error('Error while user login', error);
-      res.status(400).json({ msg: error });
-    }
-  });
-});
-
-app.post('/register', (req, res, next) => {
-  createUser(req.body, ({success, error, user}) => {
-    if (success) {
-      console.info('User created', user);
-      res.status(201).json({});
-    } else {
-      console.error('Error while user creation', error);
-      res.status(400).json({ msg: error });
-    }
-  });
-});
-
-app.get('/api/repo/list', async (req, res) => {
-  console.log(`GET /repo/list`);
-  const count = await db.ref(`repo`).count();
-  if (count) {
-    const snap = await db.ref(`repo`).get();
-    const values = snap.val();
-    res.json(values);
-  } else {
-    res.json({});
-  }
-});
-
-app.post('/api/repo/add', async (req, res) => {
-  console.log(`GET /repo/add`);
-  const ref = await db.ref(`repo`).push(req.body);
-  const snap = await ref.get();
-  res.json({
-    id: snap.key,
-    payload: snap.val(),
-  });
-});
-
-app.get('/api/repo/:name/list', async (req, res) => {
-  console.log(`GET /repo/${req.params.name}/list`);
-  const count = await db.ref(`repo/${req.params.name}`).count();
-  if (count) {
-    const snap = await db.ref(`repo/${req.params.name}`).get();
-    const values = snap.val();
-    res.json(values);
-  } else {
-    res.json({});
-  }
-});
-
-app.post('/api/repo/:name/add', async (req, res) => {
-  console.log(`GET /repo/${req.params.name}/add`);
-  const ref = await db.ref(`repo/${req.params.name}/${req.query.id}`).set({name: req.query.name});
-  const snap = await ref.get();
-  res.json(snap.val());
-});
-
-function createServer(app) {
-  const privateKey  = fs.readFileSync(config.ssl.privateKey, 'utf8');
-  const certificate = fs.readFileSync(config.ssl.certificate, 'utf8');
-  const credentials = { key: privateKey, cert: certificate };
-  return https.createServer(credentials, app);
-}
-
-db.ready(() => {
-  const server = config.general.useHttps
-    ? createServer(app)
-    : http.createServer(app);
-  server.listen(config.general.port, () => {
-    console.log('Serwer listen on port: ', config.general.port);
-    console.log('Is https used: ', config.general.useHttps);
-  });
-
-  const gracefulShutdown = (signal) => {
-    if (signal) {
-      console.log(`\nReceived signal ${signal}`);
-    }
-
-    console.log('Gracefully closing http server');
-
-    server.closeAllConnections();
-
-    db.close()
-      .then(() => {
-        console.log('db closed successfully. Exiting!');
-      })
-      .catch((err) => {
-        console.error('While closng db there was an error', err);
-      })
-      .finally(() => {
-        try {
-          server.close((err) => {
-            if (err) {
-              console.error('While closng server there was an error', err);
-              process.exit(1);
-            } else {
-              console.log('http server closed successfully. Exiting!');
-              process.exit(0);
-            }
-          })
-        } catch (err) {
-          console.error('There was an error', err);
-          setTimeout(() => process.exit(1), 500);
-        }
-      });
-  }
-
-  process.on('SIGINT', gracefulShutdown);
-  process.on('SIGTERM', gracefulShutdown);
-});
-*/
