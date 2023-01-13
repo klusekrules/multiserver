@@ -1,6 +1,12 @@
+import { LoggingLevel } from 'acebase-core';
+
 export default {
   aceBase: {
     name: '.',
+    options: {
+      logLevel: 'warn' as LoggingLevel,
+      sponsor: true,
+    }
   },
   cors: {
     origin: '*',
